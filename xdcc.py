@@ -1,10 +1,10 @@
 import socket
-import os
+import os, sys
 import thread
 import time
 import random
 import re
-
+import sqlite3
 from datetime import datetime
 from collections import deque
 
@@ -12,30 +12,48 @@ DEBUG = 0
 
 SERVERS = [
     {
-        'network': 'scenep2p', 'host': 'irc.scenep2p.net', 'port': 6667,
-        'channels': ['#THE.SOURCE']
+        'network': 'ocean', 'host': 'irc.oceanirc.net', 'port': 6667,
+        'channel': '#POWELL'
     },
     {
-        'network': 'abjects', 'host': 'irc.abjects.net', 'port': 6667,
-        'channels': ['#beast-xdcc', '#beast-chat', '#moviegods', '#mg-chat']
+        'network': 'quartz', 'host': 'irc.QuartzNet.org', 'port': 6667,
+        'channel': '#R3voLuTioN-SeRieS'
     },
+    {
+        'network': 'araba', 'host': 'irc.arabaphoenix.net', 'port': 6667,
+        'channel': '#arabafenice'
+    },
+    {
+        'network': 'futureshell', 'host': 'irc.futureshell.net', 'port': 6667,
+        'channel': '#the_pub'
+   },
+   {
+        'network': 'abandoned', 'host': 'irc.abandoned-irc.net', 'port': 6667,
+        'channel': '#PORN-HQ'
+    },
+    {
+        'network': 'openjoke', 'host': 'irc.openjoke.org', 'port': 6667,
+        'channel': '#INTERSECT'
+    },
+    {
+        'network': 'devilirc', 'host': 'irc.devilirc.net', 'port': 6667,
+        'channel': '#PapRiKa'
+    },
+    {
+        'network': 'artikanet', 'host': 'irc.artikanet.org', 'port': 6667,
+        'channel': '#EXCLUSIVE'
+    },
+
 ]
-
-
 QUEUE = deque()
 
 NICK = "habi%i" % random.randint(1, 500)
 
 
-def load_queue():
-    f = open('queue.txt', 'r')
-    while 1:
-        l = f.readline().strip()
-        if l == '':
-            break
-        (network, nick, number, filename) = l.split("\t")[:4]
-        QUEUE.append({'network': network, 'nick': nick, 'number': long(number), 'filename': filename, 'status': 'new'})
-    f.close()
+def load_queue(network, nick, bot_name, numbers_string):
+    numbers = numbers_string.split(',')
+    for number in numbers:
+        QUEUE.append({'network': network, 'nick': bot_name, 'number': long(number), 'filename': 'dummy name', 'status': 'new'})
 
 
 class Xdcc:
@@ -43,7 +61,7 @@ class Xdcc:
         self.network = config['network']
         self.host = config['host']
         self.port = config['port']
-        self.channels = config['channels']
+        self.channel = config['channel']
         self.sf = None
         self.observers = observers
 
@@ -122,6 +140,7 @@ class Xdcc:
             self.done(qe)
 
     def run(self):
+        print "RUN"
         self.sf = self.connect()
         self.send_user_info()
 
@@ -152,7 +171,7 @@ class Xdcc:
                 self.send('PONG %s' % rest)
                 continue
             if (source == ":%s" % NICK or rest.find('MODE %s' % NICK) >= 0) and joining == 0:
-                self.join_channels()
+                self.join_channel()
                 joining = 1
                 continue
             if rest.find('366') == 0:  # end of names list
@@ -163,7 +182,10 @@ class Xdcc:
                 (action, trail) = rest.split(' ', 1)
                 if action == 'PRIVMSG':
                     (target, data) = trail.split(' ', 1)
-                    if target in self.channels:
+                    #print "WARNING: XXX - target %s, Server.channel: %s"%(target, self.channel)
+                    if target.upper() == self.channel.upper():
+                        #print "nick %s"%nick
+                        #print "data: %s"%data
                         for observer in self.observers:
                             observer.channel_message(self.network, target, nick, data)
                         continue
@@ -192,9 +214,9 @@ class Xdcc:
                         if port == 0 and len(dcc_params) == 7:
                             self.fail_with_reverse_dcc(filename, qe)
                             continue
-                        if filename != qe['filename']:
-                            self.fail_with_wrong_file_name(filename, qe)
-                            continue
+                        #if filename != qe['filename']:
+                        #    self.fail_with_wrong_file_name(filename, qe)
+                        #    continue
                         if os.path.isfile(filename) and os.path.getsize(filename) > 0:
                             filesize = os.path.getsize(filename)
                             if filesize >= size:
@@ -258,10 +280,10 @@ class Xdcc:
         self.log("Failed download from %s for %s. Bot offline." % (qe['nick'], qe['filename']))
         self.fail_with_status(qe, 'offline')
 
-    def join_channels(self):
-        for channel in self.channels:
-            self.log("Joining %s" % channel)
-            self.send('JOIN %s' % channel)
+    def join_channel(self):
+        #for channel in self.channels:
+        self.log("Joining %s" % self.channel)
+        self.send('JOIN %s' % self.channel)
 
     def send_request(self, qe):
         self.log("Requesting packet %i (%s) from %s" % (qe['number'], qe['filename'], qe['nick']))
@@ -292,13 +314,14 @@ class Xdcc:
 
 class OfferObserver:
     def __init__(self):
-        self.connection = mysql.connector.connect(user='xdcc', password='xdcc', host='127.0.0.1', database='xdcc')
+        self.connection = sqlite3.connect('xdcc.db', check_same_thread=False, isolation_level=None)
+        self.create_tables()
         self.offers = {}
 
     def create_tables(self):
         self.connection.execute('''create table if not exists offers (
-                                   network varchar(32), channel varchar(32), nick varchar(64), 
-                                   number integer, name varchar(255), size varchar(16), gets integer, date datetime,
+                                   network text, channel text, nick text, 
+                                   number integer, name text, size text, gets integer, date datetime,
                                    primary key(network, nick, number))''')
 
     # ^B**^B <count> packs ^B**^B  <open_slots> of <slots> slots open, Min: <min_bw>, Record: <record_bw>
@@ -384,11 +407,22 @@ class OfferObserver:
         print "%s\t%s\t%s" % (datetime.now(), network, message)
 
 
-def xdcc(servers):
+def xdcc(servers, network, channel, bot_name, numbers):
     offer_observer = OfferObserver()
-    load_queue()
+    load_queue(network, channel, bot_name, numbers)
+    find = False
     for server in servers:
+        if server["network"] == network:
+            find = True
+            break;
+    if find == False:
+        print "Unable to find network in config, please add!"
+        sys.exit(-1)
+    else:
+        server["channel"]='#'+channel
+        print ("Find %s in config"%server["network"])
         Xdcc(server, [offer_observer]).start()
+
     while 1:
         time.sleep(5)
         add()
@@ -403,7 +437,7 @@ def add():
             l = f.readline().strip()
             if l == '':
                 break
-            (network, nick, number, filename) = l.split("\t")[:4]
+            (network, nick, number, filename) = l.split(" ")[:4]
             QUEUE.append({'network': network, 'nick': nick, 'number': long(number), 'filename': filename, 'status': 'new'})
             store_queue()
         f.close()
@@ -425,4 +459,15 @@ def write_collection(queue, filename, mode):
     f.close()
 
 
-xdcc(SERVERS)
+try:
+    network = sys.argv[1]
+    channel = sys.argv[2]
+    bot_name = sys.argv[3]
+    numbers = sys.argv[4]
+except:
+    print "Usage: %s network_name channel bot_name numbers"%sys.argv[0]
+    print "\t channel is channel name without #"
+    print "\t numbers is a comma separated string, like: 1,2,3"
+    sys.exit(0)
+
+xdcc(SERVERS, network, channel, bot_name, numbers)
